@@ -6,6 +6,7 @@ from skccm.utilities import train_test_split
 import skccm.data as data
 from skccm import Embed
 import skccm as ccm
+import sdeint
 import argparse
 import logging
 
@@ -128,6 +129,7 @@ if __name__ == "__main__":
     x = odeint(coupled_wilson_cowan, x0, t, args=(alpha, beta,
         k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, P1, P, Pp, direction))
 
+
     E1 = x[:, 0]
     I1 = x[:, 1]
     E2 = x[:, 2]
@@ -235,16 +237,6 @@ if __name__ == "__main__":
         for embed in embed_list:
             X1 = e1.embed_vectors_1d(lag, embed)
             X2 = e3.embed_vectors_1d(lag, embed)
-
-            # fig, axs = plt.subplots(1, 2)
-            # axs[0].scatter(X1[:, 0], X1[:, 1], s=0.2)
-            # axs[0].set_xlabel('E_1(t)')
-            # axs[0].set_ylabel(f'E_1(t+{lag})')
-            # axs[1].scatter(X2[:, 0], X2[:, 1], s=0.2)
-            # axs[1].set_xlabel('E_2(t)')
-            # axs[1].set_ylabel(f'E_2(t+{lag})')
-            # fig.suptitle(f'Embedding with dim {embed}')
-
             #split the embedded time series
             x1tr, x1te, x2tr, x2te = train_test_split(X1, X2, percent=.75)
 
@@ -253,7 +245,6 @@ if __name__ == "__main__":
             #library lengths to test
             len_tr = len(x1tr)
             lib_lens = np.arange(10, len_tr, len_tr/20, dtype='int')
-
             #test causation
             CCM.fit(x1tr, x2tr)
             x1p, x2p = CCM.predict(x1te, x2te, lib_lengths=lib_lens)
@@ -261,14 +252,6 @@ if __name__ == "__main__":
             sc1, sc2 = CCM.score()
             bestX2X1.append(sc1[-1])
             bestX1X2.append(sc2[-1])
-            # plt.figure()
-            # plt.title('Prediction skill as function of library lenght')
-            # plt.plot(lib_lens, sc1, label=f'X2 used to predict X1')
-            # plt.plot(lib_lens, sc2, label=f'X1 used to predict X2')
-            # plt.xlabel('Library lenght')
-            # plt.grid()
-            # plt.legend()
-            # plt.title(f'Forecast skill (embedding dim {embed})')
 
         plt.figure()
         plt.title('Prediction skills as function of embedding dimension')
@@ -276,5 +259,34 @@ if __name__ == "__main__":
         plt.plot(embed_list, bestX1X2, label="X1 for X2")
         plt.grid()
         plt.legend()
+        plt.show()
+
+        embed = int(input('Choose dimension of the embedding space: '))
+        X1 = e1.embed_vectors_1d(lag, embed)
+        X2 = e3.embed_vectors_1d(lag, embed)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 2, 1, projection='3d')
+        ax.scatter(X1[:, 0], X1[:, 1], X1[:, 2], s=0.2)
+        ax.set_xlabel('E_1(t)')
+        ax.set_ylabel(f'E_1(t+{lag})')
+        ax.set_zlabel(f'E_1(t+2*{lag})')
+
+        ax = fig.add_subplot(1, 2, 2, projection='3d')
+        ax.scatter(X2[:, 0], X2[:, 1], X2[:, 2], s=0.2)
+        ax.set_xlabel('E_2(t)')
+        ax.set_ylabel(f'E_2(t+{lag})')
+        ax.set_zlabel(f'E_2(t+2*{lag})')
+        fig.suptitle(f'Embedding with dim {embed}')
+
+        sc1, sc2 = CCM.score()
+        plt.figure()
+        plt.title('Prediction skill as function of library lenght')
+        plt.plot(lib_lens, sc1, label=f'E2 used to predict E1')
+        plt.plot(lib_lens, sc2, label=f'E1 used to predict E2')
+        plt.xlabel('Library lenght')
+        plt.grid()
+        plt.legend()
+        plt.title(f'Forecast skill (embedding dim {embed})')
         plt.show()
 
