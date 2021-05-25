@@ -111,20 +111,7 @@ def prediction_skill(x, y, lag, embed):
     CCM.fit(x1tr, x2tr)
     _, _ = CCM.predict(x1te, x2te, lib_lengths=lib_lens)
     sc1, sc2 = CCM.score()
-    return sc1, sc2, x_emb, y_emb
-
-
-def augmented_dickey_fuller_statistics(time_series):
-    '''
-    The Augmented Dickey Fuller test is a test to check the presence of a unit root in the characteristic equation of a stochastic
-    process. Such presence will implies the process to be non-stationary
-    '''
-    result = adfuller(time_series)
-    print('ADF Statistic: %f' % result[0])
-    print('p-value: %f' % result[1])
-    print('Critical Values:')
-    for key, value in result[4].items():
-        print('\t%s: %.3f' % (key, value))
+    return sc1, sc2, x_emb, y_emb, lib_lens
 
 
 def granger_causality_test(x, y, maxlag):
@@ -160,6 +147,8 @@ if __name__ == "__main__":
                         action='store_true', help='Power spectrum')
     parser.add_argument('-e', '--embedding',
                         action='store_true', help='Embedding')
+    parser.add_argument('-gc', '--granger_causality',
+                        action='store_true', help='Granger causality test')
     parser.add_argument("-log", "--log", default="info",
                         help=("Provide logging level. Example --log debug', default='info"))
 
@@ -209,7 +198,7 @@ if __name__ == "__main__":
     # initial conditions, integration step and time window
     x0 = [0.1, 0.1, 0.1, 0.1]
     step = 0.1
-    t = np.arange(0, 1000, step)
+    t = np.arange(0, 3000, step)
 
     x = odeint(coupled_wilson_cowan, x0, t, args=(alpha, beta,
         k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, P1, P, Pp, direction))
@@ -221,44 +210,49 @@ if __name__ == "__main__":
 
     if args.dynamics_figure:
         fig = plt.figure()
+        fig.tight_layout(pad=5.0)
         ax1 = plt.subplot(421)
-        ax1.plot(t[:3000], E1[:3000], lw=0.2)
+        ax1.plot(t[1000:4000], E1[1000:4000], lw=0.3)
         ax1.set_ylabel('E1')
         plt.setp(ax1.get_xticklabels(), fontsize=5)
         ax1.set_title('Time Series')
 
         ax2 = plt.subplot(423)
-        ax2.plot(t[:3000], I1[:3000], lw=0.2)
+        ax2.plot(t[10000:14000], I1[10000:14000], lw=0.3)
         ax2.set_ylabel('I1')
         plt.setp(ax2.get_xticklabels(), fontsize=5)
 
         ax3 = plt.subplot(425)
-        ax3.plot(t[:3000], E2[:3000], lw=0.2)
+        ax3.plot(t[10000:14000], E2[10000:14000], lw=0.3)
         ax3.set_ylabel('E2')
         plt.setp(ax3.get_xticklabels(), fontsize=5)
 
         ax4 = plt.subplot(427)
-        ax4.plot(t[:3000], I2[:3000], lw=0.2)
+        ax4.plot(t[10000:14000], I2[10000:14000], lw=0.3)
         ax4.set_ylabel('I2')
         ax4.set_xlabel('Time')
         plt.setp(ax4.get_xticklabels(), fontsize=5)
 
         ax5 = plt.subplot(4,2,(6,8))
-        ax5.plot(E2, I2, lw=0.2)
+        ax5.plot(E2[10000:], I2[10000:], lw=0.3)
         ax5.set_xlabel('E2')
         ax5.set_ylabel('I2')
-        ax5.set_title('2 dim Phase Space')
         ax5.grid()
 
         ax6 = plt.subplot(4, 2, (2, 4))
-        ax6.plot(E1, I1, lw=0.2)
+        ax6.plot(E1[:10000], I1[:10000], lw=0.3)
         ax6.set_xlabel('E1')
         ax6.set_ylabel('I1')
+        ax6.set_title('2 dim Phase Space')
         ax6.grid()
         plt.show()
 
-        plt.subplot(projection='3d')
-        plt.plot(E1, E2, I2, lw=0.2)
+        ax = plt.subplot(projection='3d')
+        ax.plot(E1[:10000], E2[:10000], I2[:10000], lw=0.3)
+        ax.set_xlabel('E1')
+        ax.set_ylabel('E2')
+        ax.set_zlabel('I2')
+        plt.title('3D phase space')
         plt.show()
 
     if args.ic_sensibility:
@@ -285,16 +279,16 @@ if __name__ == "__main__":
                             power_spectrum(E2,t,step), power_spectrum(I2,t,step)]
 
         ax = plt.subplot(411)
-        ax.plot(powerspectrum[0][0], powerspectrum[0][1])
+        ax.plot(powerspectrum[0][0], powerspectrum[0][1], lw=0.3)
         ax.set_title('E1')
         ax = plt.subplot(412)
-        ax.plot(powerspectrum[1][0], powerspectrum[1][1])
+        ax.plot(powerspectrum[1][0], powerspectrum[1][1], lw=0.3)
         ax.set_title('I1')
         ax = plt.subplot(413)
-        ax.plot(powerspectrum[2][0], powerspectrum[2][1])
+        ax.plot(powerspectrum[2][0], powerspectrum[2][1], lw=0.3)
         ax.set_title('E2')
         ax = plt.subplot(414)
-        ax.plot(powerspectrum[3][0], powerspectrum[3][1])
+        ax.plot(powerspectrum[3][0], powerspectrum[3][1], lw=0.3)
         ax.set_xlabel('Frequency')
         ax.set_title('I2')
         plt.show()
@@ -348,10 +342,10 @@ if __name__ == "__main__":
         bestE1I2, bestI2E1 = [], []
         bestE2I2, bestI2E2 = [], []
         for embed in embed_list:
-            sc1ee, sc2ee, E1_emb, E2_emb = prediction_skill(E1, E2, lag, embed)
-            sc1ei1, sc2ei1, E1_emb, I2_emb = prediction_skill(E1, I2, lag, embed)
-            sc1ei2, sc2ei2, E2_emb, I1_emb = prediction_skill(E2, I1, lag, embed)
-            sc1ii, sc2ii, E2_emb, I1_emb = prediction_skill(I1, I2, lag, embed)
+            sc1ee, sc2ee, E1_emb, E2_emb, _ = prediction_skill(E1, E2, lag, embed)
+            sc1ei1, sc2ei1, E1_emb, I2_emb, _ = prediction_skill(E1, I2, lag, embed)
+            sc1ei2, sc2ei2, E2_emb, I1_emb, _ = prediction_skill(E2, I1, lag, embed)
+            sc1ii, sc2ii, E2_emb, I1_emb, _ = prediction_skill(I1, I2, lag, embed)
             if direction == 0:
                 bestE2E1.append(sc1ee[-1]) # E1 -> E2
                 bestI2E1.append(sc1ei1[-1]) # E1 -> I2
@@ -394,45 +388,47 @@ if __name__ == "__main__":
         plt.show()
 
         embed = int(input('Choose dimension of the embedding space: '))
-        sc1ee, sc2ee, E1emb, E2emb = prediction_skill(E1, E2, lag, embed)
-        sc1ii, sc2ii, I1emb, I2emb = prediction_skill(I1, I2, lag, embed)
+        sc1ee, sc2ee, E1emb, E2emb, lib_lens_ee = prediction_skill(E1, E2, lag, embed)
+        sc1ii, sc2ii, I1emb, I2emb, lib_lens_ii = prediction_skill(I1, I2, lag, embed)
 
         fig = plt.figure()
         plt.title(f'Embedded attractors. Dimension equal to {embed}')
         ax = fig.add_subplot(2, 2, 1, projection='3d')
-        ax.scatter(E1emb[:, 0], E1emb[:, 1], E1emb[:, 2], s=0.2)
+        ax.scatter(E1emb[:, 0][2000:], E1emb[:, 1][2000:], E1emb[:, 2][2000:], s=0.2)
         ax.set_xlabel('E1(t)')
         ax.set_ylabel(f'E1(t+{lag})')
         ax.set_zlabel(f'E1(t+2*{lag})')
 
         ax = fig.add_subplot(2, 2, 2, projection='3d')
-        ax.scatter(E2emb[:, 0], E2emb[:, 1], E2emb[:, 2], s=0.2)
+        ax.scatter(E2emb[:, 0][2000:], E2emb[:, 1][2000:], E2emb[:, 2][2000:], s=0.2)
         ax.set_xlabel('E2(t)')
         ax.set_ylabel(f'E2(t+{lag})')
         ax.set_zlabel(f'E2(t+2*{lag})')
 
         ax = fig.add_subplot(2, 2, 3, projection='3d')
-        ax.scatter(I1emb[:, 0], I1emb[:, 1], I1emb[:, 2], s=0.2)
+        ax.scatter(I1emb[:, 0][2000:], I1emb[:, 1][2000:], I1emb[:, 2][2000:], s=0.2)
         ax.set_xlabel('I1(t)')
         ax.set_ylabel(f'I1(t+{lag})')
         ax.set_zlabel(f'I1(t+2*{lag})')
 
         ax = fig.add_subplot(2, 2, 4, projection='3d')
-        ax.scatter(I2emb[:, 0], I2emb[:, 1], I2emb[:, 2], s=0.2)
+        ax.scatter(I2emb[:, 0][2000:], I2emb[:, 1][2000:], I2emb[:, 2][2000:], s=0.2)
         ax.set_xlabel('I2(t)')
         ax.set_ylabel(f'I2(t+{lag})')
         ax.set_zlabel(f'I2(t+2*{lag})')
 
         plt.figure()
         plt.title('Prediction skill as function of library lenght')
-        plt.plot(sc1ee, label=f'E1 => E2')
-        plt.plot(sc2ee, label=f'E2 => E1')
+        plt.plot(lib_lens_ee, sc1ee, label='E1 => E2')
+        plt.plot(lib_lens_ii, sc2ee, label='E2 => E1')
         plt.xlabel('Library lenght')
         plt.grid()
         plt.legend()
         plt.show()
 
 
-    # if args.aug_dickey_fuller:
-    #     augmented_dickey_fuller_statistics(E1)
+    if args.granger_causality:
+        gca = granger_causality_test(E2, E1, 5)
+        gca = granger_causality_test(E1, E2, 5)
+
 
