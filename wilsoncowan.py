@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import math
 from skccm.utilities import train_test_split
 from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.tsa.stattools import adfuller, grangercausalitytests
 import skccm.data as data
 from skccm import Embed
 import skccm as ccm
@@ -111,6 +112,35 @@ def prediction_skill(x, y, lag, embed):
     _, _ = CCM.predict(x1te, x2te, lib_lengths=lib_lens)
     sc1, sc2 = CCM.score()
     return sc1, sc2, x_emb, y_emb
+
+
+def augmented_dickey_fuller_statistics(time_series):
+    '''
+    The Augmented Dickey Fuller test is a test to check the presence of a unit root in the characteristic equation of a stochastic
+    process. Such presence will implies the process to be non-stationary
+    '''
+    result = adfuller(time_series)
+    print('ADF Statistic: %f' % result[0])
+    print('p-value: %f' % result[1])
+    print('Critical Values:')
+    for key, value in result[4].items():
+        print('\t%s: %.3f' % (key, value))
+
+
+def granger_causality_test(x, y, maxlag):
+    '''
+    Test to check if y Granger causes x
+    '''
+    if type(x) != 'numpy.ndarry':
+        x = np.array(x)
+    if type(y) != 'numpy.ndarry':
+        y = np.array(y)
+
+    gca_list = np.array([x, y])
+    gca_matrix = np.transpose(gca_list)
+    gca = grangercausalitytests(gca_matrix, maxlag=maxlag, verbose=True)
+
+    return gca
 
 
 if __name__ == "__main__":
@@ -314,50 +344,51 @@ if __name__ == "__main__":
         embed_list = np.arange(1,10,1)
         bestE2E1, bestE1E2 = [], []
         bestI1I2, bestI2I1 = [], []
-        bestE1I1, bestI1E1 = [], []
         bestE2I1, bestI1E2 = [], []
         bestE1I2, bestI2E1 = [], []
         bestE2I2, bestI2E2 = [], []
         for embed in embed_list:
             sc1ee, sc2ee, E1_emb, E2_emb = prediction_skill(E1, E2, lag, embed)
-            bestE2E1.append(sc1ee[-1])
-            bestE1E2.append(sc2ee[-1])
-
-            sc1ei, sc2ei, E1_emb, I1_emb = prediction_skill(E1, I1, lag, embed)
-            bestI1E1.append(sc1ei[-1])
-            bestE1I1.append(sc2ei[-1])
-
             sc1ei1, sc2ei1, E1_emb, I2_emb = prediction_skill(E1, I2, lag, embed)
-            bestI2E1.append(sc1ei1[-1])
-            bestE1I2.append(sc2ei1[-1])
-
             sc1ei2, sc2ei2, E2_emb, I1_emb = prediction_skill(E2, I1, lag, embed)
-            bestI1E2.append(sc1ei2[-1])
-            bestE2I1.append(sc2ei2[-1])
-
-            sc1ei3, sc2ei3, E2_emb, I2_emb = prediction_skill(E2, I2, lag, embed)
-            bestI2E2.append(sc1ei3[-1])
-            bestE2I2.append(sc2ei3[-1])
-
             sc1ii, sc2ii, E2_emb, I1_emb = prediction_skill(I1, I2, lag, embed)
-            bestI2I1.append(sc1ii[-1])
-            bestI1I2.append(sc2ii[-1])
+            if direction == 0:
+                bestE2E1.append(sc1ee[-1]) # E1 -> E2
+                bestI2E1.append(sc1ei1[-1]) # E1 -> I2
+                bestE2I1.append(sc2ei2[-1]) # I1 -> E2
+                bestI2I1.append(sc1ii[-1]) # I1 -> I2
+                # Just to check that E2 does not drive E1
+                bestE1E2.append(sc2ee[-1])  # E2 -> E1
+            else:
+                bestE1E2.append(sc2ee[-1]) # E2 -> E1
+                bestE1I2.append(sc2ei1[-1]) # I2 -> E1
+                bestI1E2.append(sc1ei2[-1]) # E2 -> I1
+                bestI1I2.append(sc2ii[-1]) # I2 -> I1
+                bestE2E1.append(sc1ee[-1])  # E1 -> E2
+                bestI2E1.append(sc1ei1[-1])  # E1 -> I2
+                bestE2I1.append(sc2ei2[-1])  # I1 -> E2
+                bestI2I1.append(sc1ii[-1])  # I1 -> I2
 
         plt.figure()
         plt.title('Prediction skills as function of embedding dimension')
-        plt.plot(embed_list, bestE2E1, label="E2 for E1")
-        plt.plot(embed_list, bestE1E2, label="E1 for E2")
-        plt.plot(embed_list, bestI1I2, label="I1 for I2")
-        plt.plot(embed_list, bestI2I1, label="I2 for I1")
-        plt.plot(embed_list, bestE1I1, label="E1 for I1")
-        plt.plot(embed_list, bestI1E1, label="I1 for E1")
-        plt.plot(embed_list, bestE2I1, label="E2 for I1")
-        plt.plot(embed_list, bestI1E2, label="I1 for E2")
-        plt.plot(embed_list, bestE1I2, label="E1 for I2")
-        plt.plot(embed_list, bestI2E1, label="I2 for E1")
-        plt.plot(embed_list, bestI2E2, label="I2 for E2")
-        plt.plot(embed_list, bestE2I2, label="E2 for I2")
+        if direction == 0:
+            plt.plot(embed_list, bestE2E1, label="E1 => E2")
+            plt.plot(embed_list, bestI2I1, label="I1 => I2")
+            plt.plot(embed_list, bestE2I1, label="I1 => E2")
+            plt.plot(embed_list, bestI2E1, label="E1 => I2")
+            plt.plot(embed_list, bestE1E2, label="E2 => E1")
+        else:
+            plt.plot(embed_list, bestE2E1, label="E1 => E2")
+            plt.plot(embed_list, bestI2I1, label="I1 => I2")
+            plt.plot(embed_list, bestE2I1, label="I1 => E2")
+            plt.plot(embed_list, bestI2E1, label="E1 => I2")
+            plt.plot(embed_list, bestE1E2, label="E2 => E1")
+            plt.plot(embed_list, bestI1I2, label="I2 => I1")
+            plt.plot(embed_list, bestI1E2, label="E2 => I1")
+            plt.plot(embed_list, bestE1I2, label="I2 => E1")
+            
         plt.ylabel('Coefficient of determination')
+        plt.xlabel('Dimension')
         plt.grid()
         plt.legend()
         plt.show()
@@ -394,12 +425,14 @@ if __name__ == "__main__":
 
         plt.figure()
         plt.title('Prediction skill as function of library lenght')
-        plt.plot(sc1ee, label=f'E2 used to predict E1')
-        plt.plot(sc2ee, label=f'E1 used to predict E2')
-        plt.plot(sc1ii, label=f'I1 used to predict I2')
-        plt.plot(sc2ii, label=f'I2 used to predict I1')
+        plt.plot(sc1ee, label=f'E1 => E2')
+        plt.plot(sc2ee, label=f'E2 => E1')
         plt.xlabel('Library lenght')
         plt.grid()
         plt.legend()
         plt.show()
+
+
+    # if args.aug_dickey_fuller:
+    #     augmented_dickey_fuller_statistics(E1)
 
