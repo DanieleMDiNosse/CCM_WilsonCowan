@@ -189,10 +189,18 @@ if __name__ == "__main__":
     # alpha, beta = (7.0, 2.0)
     # alpha, beta = (5.8, 0.1)
     if direction == 0:
-        alpha, beta = (5.3, -2.0)
+        strenght = input('Stronger or weaker E1-I2 coupling? [s/w]: ')
+        if strenght == 's':
+            alpha, beta = (5.3, -2.0)
+        else:
+            alpha, beta = (5.8, 0.1)
         logging.info(f'Chaotic regime --> alpha, beta = ({alpha}, {beta})')
     else:
-        alpha, beta = (1.3, -2.0)
+        strenght = input('Stronger or weaker E1-I2 coupling? [s/w]: ')
+        if strenght == 's':
+            alpha, beta = (1.3, -2.0)
+        else:
+            alpha, beta = (1.3, 0.1)
         logging.info(f'Chaoitc regime --> alpha, beta = ({alpha}, {beta})')
 
     # initial conditions, integration step and time window
@@ -428,7 +436,10 @@ if __name__ == "__main__":
 
 
     if args.granger_causality:
-        gca = granger_causality_test(E2, E1, 5)
-        gca = granger_causality_test(E1, E2, 5)
+        lenght = 2000
+        print("\n --------E1 Granger causes E2----------")
+        gca = granger_causality_test(E2[:lenght], E1[:lenght], 10)
+        print("\n --------E2 Granger causes E1----------")
+        gca = granger_causality_test(E1[:lenght], E2[:lenght], 10)
 
 
