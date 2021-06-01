@@ -11,6 +11,9 @@ import skccm as ccm
 import sdeint
 import argparse
 import logging
+from tqdm import tqdm
+from pyinform import mutual_info
+from sklearn.metrics import mutual_info_score
 
 def sigmoid_function(x, a, theta):
     '''
@@ -20,7 +23,7 @@ def sigmoid_function(x, a, theta):
     return 1 / (1 + math.exp(-a*(x - theta))) - 1 / (1 + math.exp(a*theta))
 
 
-def wilson_cowan(x, t, k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, P, Q):
+def wilson_cowan(x, t, k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, a_e, a_i, theta_e, theta_i, P, Q):
     '''
     A simple Wilson-Cowan model.
     '''
@@ -63,6 +66,45 @@ def coupled_wilson_cowan(x, t, alpha, beta,
     return [dE1dt, dI1dt, dE2dt, dI2dt]
 
 
+def noisy_coupled_wc(alpha, beta,
+                     k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, P1, P, Pp, direction, dt, time, x0):
+
+
+    E1 = np.zeros(len(time))
+    I1 = np.zeros(len(time))
+    E2 = np.zeros(len(time))
+    I2 = np.zeros(len(time))
+    v = np.ones(len(time))
+    [E1[0], I1[0], E2[0], I2[0]] = x0
+
+    for t in range(len(time)-1):
+        if direction == 0:
+            v[t+1] = np.abs(v[t] + 1*dt - v[t]*dt - 0.1*np.sqrt(dt)*np.random.normal())
+            Ze = np.random.poisson(v[t+1])
+            E1[t+1] = (E1[t] - E1[t]*dt + (k_e - E1[t])*sigmoid_function(c1 *
+                    E1[t] - c2*I1[t] + Ze, a_e, theta_e)*dt) / tau_e
+            I1[t+1] = (I1[t] - I1[t]*dt + (k_i - I1[t])*sigmoid_function(c3 *
+                    E1[t] - c4*I1[t], a_i, theta_i)*dt) / tau_i
+            E2[t+1] = (E2[t] - E2[t]*dt + (k_e - E2[t])*sigmoid_function(c1 *
+                    E2[t] - c2*I2[t] + alpha*E1[t], a_e, theta_e)*dt) / tau_e
+            I2[t+1] = (I2[t] - I2[t]*dt + (k_i - I2[t])*sigmoid_function(c3 *
+                        E2[t] - c4*I2[t] + beta*E1[t], a_i, theta_i)*dt) / tau_i
+        else:
+            v[t+1] = np.abs(v[t] + 1*dt - v[t]*dt - 0.1*np.sqrt(dt)*np.random.normal())
+            Ze = np.random.poisson(v[t+1])
+            Zi = np.random.poisson(v[t+1])
+            E1[t+1] = (E1[t] - E1[t]*dt + (k_e - E1[t])*sigmoid_function(c1 *
+                    E1[t] - c2*I1[t] + Ze + alpha*E2[t], a_e, theta_e)*dt) / tau_e
+            I1[t+1] = (I1[t] - I1[t]*dt + (k_i - I1[t])*sigmoid_function(c3 *
+                    E1[t] - c4*I1[t], a_i, theta_i)*dt) / tau_i
+            E2[t+1] = (E2[t] - E2[t]*dt + (k_e - E2[t])*sigmoid_function(c1 *
+                    E2[t] - c2*I2[t] + Zi + alpha*E1[t], a_e, theta_e)*dt) / tau_e
+            I2[t+1] = (I2[t] - I2[t]*dt + (k_i - I2[t])*sigmoid_function(c3 *
+                        E2[t] - c4*I2[t], a_i, theta_i)*dt) / tau_i
+
+    return E1, I1, E2, I2, v
+
+
 def power_spectrum(x, t, step):
     '''
     Power spectrum calculated using Fast Fourier Transform of Numpy. It is normalized by the lenght
@@ -76,6 +118,24 @@ def power_spectrum(x, t, step):
     X = [frequency, powerspectrum]
 
     return X
+
+
+def crosscorr(x, y, max_lag):
+    x_mean = np.mean(x)
+    y_mean = np.mean(y)
+    cross_corr = []
+    for d in range(max_lag):
+        cc = 0
+        for i in range(len(x)-d):
+            cc += (x[i] - x_mean) * (y[i+d] - y_mean)
+        cc = cc / np.sqrt(np.sum((x - x_mean)**2) * np.sum((y - y_mean)**2))
+        cross_corr.append(cc)
+
+    plt.plot(cross_corr)
+    plt.title('Cross-correlation function')
+    plt.xlabel('Lags')
+    plt.grid()
+    return cross_corr
 
 
 def autocorrelation(x, max_lag):
@@ -114,7 +174,7 @@ def prediction_skill(x, y, lag, embed):
     return sc1, sc2, x_emb, y_emb, lib_lens
 
 
-def granger_causality_test(x, y, maxlag):
+def granger_causality_test(x, y, maxlag, verbose=False):
     '''
     Test to check if y Granger causes x
     '''
@@ -125,7 +185,7 @@ def granger_causality_test(x, y, maxlag):
 
     gca_list = np.array([x, y])
     gca_matrix = np.transpose(gca_list)
-    gca = grangercausalitytests(gca_matrix, maxlag=maxlag, verbose=True)
+    gca = grangercausalitytests(gca_matrix, maxlag=maxlag, verbose=verbose)
 
     return gca
 
@@ -138,7 +198,7 @@ if __name__ == "__main__":
     parser.add_argument('-df', '--dynamics_figure', 
                         action='store_true', help='Plot dynamics characteristics.')
     parser.add_argument('-mi', '--mutual_information',
-                        action='store_true', help='Plot mutual information.')
+                        action='store_true', help='Plot mutual information as function on lag.')
     parser.add_argument('-ac', '--autocorr',
                         action='store_true', help='Plot autocorrelation function')
     parser.add_argument('-ic', '--ic_sensibility',
@@ -149,6 +209,13 @@ if __name__ == "__main__":
                         action='store_true', help='Embedding')
     parser.add_argument('-gc', '--granger_causality',
                         action='store_true', help='Granger causality test')
+    parser.add_argument('-f', '--free_parameters',
+                        action='store_true', help='Use this parser if you wanto to choose other alpha and beta')
+    parser.add_argument('-cc', '--cross_correlation',
+                        action='store_true', help='Cross correlation')
+    parser.add_argument('-n', '--noisywc',
+                        action='store_true', help='Add noise to the first oscillator')
+
     parser.add_argument("-log", "--log", default="info",
                         help=("Provide logging level. Example --log debug', default='info"))
 
@@ -185,83 +252,109 @@ if __name__ == "__main__":
         logging.info('Bidirectional coupling Wilson-Cowan circuits')
         direction = 1
 
-    # Bifurcation parameters
-    # alpha, beta = (7.0, 2.0)
-    # alpha, beta = (5.8, 0.1)
+    # Some set of (alpha,beta). Stronger and weaker are just put as a way to distinguish them.
     if direction == 0:
-        strenght = input('Stronger or weaker E1-I2 coupling? [s/w]: ')
-        if strenght == 's':
-            alpha, beta = (5.3, -2.0)
+        if args.free_parameters:
+            alpha = float(input('Choose alpha: '))
+            beta = float(input('Choose beta: '))
         else:
-            alpha, beta = (5.8, 0.1)
-        logging.info(f'Chaotic regime --> alpha, beta = ({alpha}, {beta})')
+            strenght = input('Stronger or weaker E1-I2 coupling? [s/w]: ')
+            if strenght == 's':
+                alpha, beta = (5.3, -2.0)
+            else:
+                alpha, beta = (5.8, 0.1)
+            logging.info(f'Chaotic regime --> alpha, beta = ({alpha}, {beta})')
     else:
-        strenght = input('Stronger or weaker E1-I2 coupling? [s/w]: ')
-        if strenght == 's':
-            alpha, beta = (1.3, -2.0)
-        else:
-            alpha, beta = (1.3, 0.1)
-        logging.info(f'Chaoitc regime --> alpha, beta = ({alpha}, {beta})')
+        alpha = 1.3
+        beta = 0
+        logging.info(f'Chaoitc regime --> alpha, beta = {alpha}')
 
     # initial conditions, integration step and time window
     x0 = [0.1, 0.1, 0.1, 0.1]
     step = 0.1
     t = np.arange(0, 3000, step)
 
-    x = odeint(coupled_wilson_cowan, x0, t, args=(alpha, beta,
-        k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, P1, P, Pp, direction))
-
-    E1 = x[:, 0]
-    I1 = x[:, 1]
-    E2 = x[:, 2]
-    I2 = x[:, 3]
+    if args.noisywc:
+        E1, I1, E2, I2, v = noisy_coupled_wc(alpha, beta, k_e, k_i, c1, c2, c3, c4, tau_e,
+                                          tau_i, P1, P, Pp, direction, dt=step, time=t, x0=x0)
+    else:
+        x = odeint(coupled_wilson_cowan, x0, t, args=(alpha, beta,
+            k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, P1, P, Pp, direction))
+        E1 = x[:, 0]
+        I1 = x[:, 1]
+        E2 = x[:, 2]
+        I2 = x[:, 3]
+    e1, e2, e3, e4 = Embed(E1), Embed(I1), Embed(E2), Embed(I2)
 
     if args.dynamics_figure:
-        fig = plt.figure()
-        fig.tight_layout(pad=5.0)
-        ax1 = plt.subplot(421)
-        ax1.plot(t[1000:4000], E1[1000:4000], lw=0.3)
-        ax1.set_ylabel('E1')
-        plt.setp(ax1.get_xticklabels(), fontsize=5)
-        ax1.set_title('Time Series')
+        t = t[:5000]
+        E1t, E2t, I1t, I2t = E1[:5000], E2[:5000], I1[:5000], I2[:5000]
+        if args.noisywc:
+            vt = v[:5000]
+            fig = plt.figure()
+            fig.suptitle('Time series')
+            ax1 = plt.subplot(511)
+            ax1.plot(t, E1t, 'k', lw=0.4)
+            ax1.set_title('E1')
+            ax2 = plt.subplot(512)
+            ax2.plot(t, I1t, 'k', lw=0.4)
+            ax2.set_title('I1')
+            ax3 = plt.subplot(513)
+            ax3.plot(t, E2t, 'k', lw=0.4)
+            ax3.set_title('E2')
+            ax4 = plt.subplot(514)
+            ax4.plot(t, I2t, 'k', lw=0.4)
+            ax4.set_title('I2')
+            ax5 = plt.subplot(515)
+            ax5.plot(t, vt, 'k', lw=0.4)
+            ax5.set_title('Noise')
+            plt.show()
+        else:
+            fig = plt.figure()
+            fig.tight_layout(pad=5.0)
+            ax1 = plt.subplot(421)
+            ax1.plot(t, E1t, 'k', lw=0.4)
+            ax1.set_ylabel('E1')
+            plt.setp(ax1.get_xticklabels(), fontsize=5)
+            ax1.set_title('Time series')
 
-        ax2 = plt.subplot(423)
-        ax2.plot(t[10000:14000], I1[10000:14000], lw=0.3)
-        ax2.set_ylabel('I1')
-        plt.setp(ax2.get_xticklabels(), fontsize=5)
+            ax2 = plt.subplot(423)
+            ax2.plot(t, I1t, 'k', lw=0.4)
+            ax2.set_ylabel('I1')
+            plt.setp(ax2.get_xticklabels(), fontsize=5)
 
-        ax3 = plt.subplot(425)
-        ax3.plot(t[10000:14000], E2[10000:14000], lw=0.3)
-        ax3.set_ylabel('E2')
-        plt.setp(ax3.get_xticklabels(), fontsize=5)
+            ax3 = plt.subplot(425)
+            ax3.plot(t, E2t, 'k', lw=0.4)
+            ax3.set_ylabel('E2')
+            plt.setp(ax3.get_xticklabels(), fontsize=5)
 
-        ax4 = plt.subplot(427)
-        ax4.plot(t[10000:14000], I2[10000:14000], lw=0.3)
-        ax4.set_ylabel('I2')
-        ax4.set_xlabel('Time')
-        plt.setp(ax4.get_xticklabels(), fontsize=5)
+            ax4 = plt.subplot(427)
+            ax4.plot(t, I2t, 'k', lw=0.4)
+            ax4.set_ylabel('I2')
+            ax4.set_xlabel('Time')
+            plt.setp(ax4.get_xticklabels(), fontsize=5)
 
-        ax5 = plt.subplot(4,2,(6,8))
-        ax5.plot(E2[10000:], I2[10000:], lw=0.3)
-        ax5.set_xlabel('E2')
-        ax5.set_ylabel('I2')
-        ax5.grid()
+            ax5 = plt.subplot(4,2,(6,8))
+            ax5.plot(E2[10000:], I2[10000:], 'k', lw=0.4)
+            ax5.set_xlabel('E2')
+            ax5.set_ylabel('I2')
+            ax5.grid()
 
-        ax6 = plt.subplot(4, 2, (2, 4))
-        ax6.plot(E1[:10000], I1[:10000], lw=0.3)
-        ax6.set_xlabel('E1')
-        ax6.set_ylabel('I1')
-        ax6.set_title('2 dim Phase Space')
-        ax6.grid()
-        plt.show()
+            ax6 = plt.subplot(4, 2, (2, 4))
+            ax6.plot(E1[:10000], I1[:10000], 'k', lw=0.4)
+            ax6.set_xlabel('E1')
+            ax6.set_ylabel('I1')
+            ax6.set_title('2 dim phase space')
+            ax6.grid()
+            plt.show()
 
-        ax = plt.subplot(projection='3d')
-        ax.plot(E1[:10000], E2[:10000], I2[:10000], lw=0.3)
-        ax.set_xlabel('E1')
-        ax.set_ylabel('E2')
-        ax.set_zlabel('I2')
-        plt.title('3D phase space')
-        plt.show()
+            ax = plt.subplot(projection='3d')
+            ax.plot(E1[:10000], E2[:10000], I2[:10000], 'k', lw=0.4)
+            ax.set_xlabel('E1')
+            ax.set_ylabel('E2')
+            ax.set_zlabel('I2')
+            plt.title('3D phase space')
+            plt.show()
 
     if args.ic_sensibility:
         x01 = [0.1001, 0.1001, 0.1001, 0.1001]
@@ -274,66 +367,83 @@ if __name__ == "__main__":
 
         plt.figure()
         plt.title('Initial condition sensibility')
-        plt.plot(t[:3200], E21[:3200], 'k--',
+        plt.plot(t, E21, 'k--',
                  label=f'{x01}')
-        plt.plot(t[:3200], E2[:3200], 'r', alpha=0.6,
+        plt.plot(t, E2, 'r', alpha=0.6,
                  label=f'{x0}')
         plt.grid()
         plt.legend()
         plt.show()
 
     if args.power_spectrum_:
-        powerspectrum = [power_spectrum(E1,t,step), power_spectrum(I1,t,step),
-                            power_spectrum(E2,t,step), power_spectrum(I2,t,step)]
+        if args.noisywc:
+            powerspectrum = [power_spectrum(E1, t, step), power_spectrum(I1, t, step),
+                             power_spectrum(E2, t, step), power_spectrum(I2, t, step),
+                             power_spectrum(v, t, step)]
+            n = 5
+        else:
+            n = 4
+            powerspectrum = [power_spectrum(E1, t, step), power_spectrum(I1, t, step),
+                             power_spectrum(E2, t, step), power_spectrum(I2, t, step)]
 
-        ax = plt.subplot(411)
-        ax.plot(powerspectrum[0][0], powerspectrum[0][1], lw=0.3)
+        ax = plt.subplot(n,1,1)
+        ax.plot(powerspectrum[0][0], powerspectrum[0][1], 'k', lw=0.4)
         ax.set_title('E1')
-        ax = plt.subplot(412)
-        ax.plot(powerspectrum[1][0], powerspectrum[1][1], lw=0.3)
+        ax = plt.subplot(n,1,2)
+        ax.plot(powerspectrum[1][0], powerspectrum[1][1], 'k', lw=0.4)
         ax.set_title('I1')
-        ax = plt.subplot(413)
-        ax.plot(powerspectrum[2][0], powerspectrum[2][1], lw=0.3)
+        ax = plt.subplot(n,1,3)
+        ax.plot(powerspectrum[2][0], powerspectrum[2][1], 'k', lw=0.4)
         ax.set_title('E2')
-        ax = plt.subplot(414)
-        ax.plot(powerspectrum[3][0], powerspectrum[3][1], lw=0.3)
-        ax.set_xlabel('Frequency')
+        ax = plt.subplot(n,1,4)
+        ax.plot(powerspectrum[3][0], powerspectrum[3][1], 'k', lw=0.4)
         ax.set_title('I2')
+        if args.noisywc:
+            ax = plt.subplot(n,1,5)
+            ax.plot(powerspectrum[4][0], powerspectrum[4][1], 'k', lw=0.4)
+            ax.set_title('Noise')
+        ax.set_xlabel('Frequency')
         plt.show()
-
-    e1, e2, e3, e4 = Embed(E1), Embed(I1), Embed(E2), Embed(I2)
 
     # Mutual Information. It is calculated from skccm.Embed.mutual_information that relies of sklearn
     if args.mutual_information:
         fig, axs = plt.subplots(4)
         lag = 200
-        axs[0].plot(e1.mutual_information(lag))
+        axs[0].plot(e1.mutual_information(lag), 'k', lw=0.8)
         axs[0].set_title('E1')
-        axs[1].plot(e2.mutual_information(lag))
+        axs[1].plot(e2.mutual_information(lag), 'k', lw=0.8)
         axs[1].set_title('I1')
-        axs[2].plot(e3.mutual_information(lag))
+        axs[2].plot(e3.mutual_information(lag), 'k', lw=0.8)
         axs[2].set_title('E2')
-        axs[3].plot(e4.mutual_information(lag))
+        axs[3].plot(e4.mutual_information(lag), 'k', lw=0.8)
         axs[3].set_title('I2')
         axs[3].set_xlabel('Lags')
         fig.suptitle('Mutual Information')
         plt.show()
 
+
     if args.autocorr:
         # Maybe I can implement a test significance
-        lag = 200
+        lag = 400
         auto_corrE1 = autocorrelation(E1, lag)
         auto_corrI1 = autocorrelation(I1, lag)
         auto_corrE2 = autocorrelation(E2, lag)
         auto_corrI2 = autocorrelation(I2, lag)
         plt.figure()
         plt.title('Autocorrelation')
-        plt.plot(auto_corrE1, label='E1')
-        plt.plot(auto_corrI1, label='I1')
-        plt.plot(auto_corrE2, label='E2')
-        plt.plot(auto_corrI2, label='I2')
+        plt.plot(auto_corrE1, 'k', lw=0.8, label='E1')
+        plt.plot(auto_corrI1, 'r', lw=0.8, label='I1')
+        plt.plot(auto_corrE2, 'g', lw=0.8, label='E2')
+        plt.plot(auto_corrI2, 'y', lw=0.8, label='I2')
         plt.grid()
         plt.legend()
+        plt.show()
+
+    if args.cross_correlation:
+        plt.figure()
+        crosscorr(E1, E2, 1000)
+        crosscorr(E2, E1, 1000)
+        plt.legend(['E1->E2', 'E2->E1'])
         plt.show()
 
 
@@ -349,7 +459,7 @@ if __name__ == "__main__":
         bestE2I1, bestI1E2 = [], []
         bestE1I2, bestI2E1 = [], []
         bestE2I2, bestI2E2 = [], []
-        for embed in embed_list:
+        for embed in tqdm(embed_list, desc='Embedding dimension list'):
             sc1ee, sc2ee, E1_emb, E2_emb, _ = prediction_skill(E1, E2, lag, embed)
             sc1ei1, sc2ei1, E1_emb, I2_emb, _ = prediction_skill(E1, I2, lag, embed)
             sc1ei2, sc2ei2, E2_emb, I1_emb, _ = prediction_skill(E2, I1, lag, embed)
@@ -402,44 +512,58 @@ if __name__ == "__main__":
         fig = plt.figure()
         plt.title(f'Embedded attractors. Dimension equal to {embed}')
         ax = fig.add_subplot(2, 2, 1, projection='3d')
-        ax.scatter(E1emb[:, 0][2000:], E1emb[:, 1][2000:], E1emb[:, 2][2000:], s=0.2)
+        ax.scatter(E1emb[:, 0][2000:], E1emb[:, 1][2000:], E1emb[:, 2][2000:], 'k', s=0.1)
         ax.set_xlabel('E1(t)')
         ax.set_ylabel(f'E1(t+{lag})')
         ax.set_zlabel(f'E1(t+2*{lag})')
 
         ax = fig.add_subplot(2, 2, 2, projection='3d')
-        ax.scatter(E2emb[:, 0][2000:], E2emb[:, 1][2000:], E2emb[:, 2][2000:], s=0.2)
+        ax.scatter(E2emb[:, 0][2000:], E2emb[:, 1][2000:], E2emb[:, 2][2000:], 'k', s=0.1)
         ax.set_xlabel('E2(t)')
         ax.set_ylabel(f'E2(t+{lag})')
         ax.set_zlabel(f'E2(t+2*{lag})')
 
         ax = fig.add_subplot(2, 2, 3, projection='3d')
-        ax.scatter(I1emb[:, 0][2000:], I1emb[:, 1][2000:], I1emb[:, 2][2000:], s=0.2)
+        ax.scatter(I1emb[:, 0][2000:], I1emb[:, 1][2000:], I1emb[:, 2][2000:], 'k', s=0.1) 
         ax.set_xlabel('I1(t)')
         ax.set_ylabel(f'I1(t+{lag})')
         ax.set_zlabel(f'I1(t+2*{lag})')
 
         ax = fig.add_subplot(2, 2, 4, projection='3d')
-        ax.scatter(I2emb[:, 0][2000:], I2emb[:, 1][2000:], I2emb[:, 2][2000:], s=0.2)
+        ax.scatter(I2emb[:, 0][2000:], I2emb[:, 1][2000:], I2emb[:, 2][2000:], 'k', s=0.1)
         ax.set_xlabel('I2(t)')
         ax.set_ylabel(f'I2(t+{lag})')
         ax.set_zlabel(f'I2(t+2*{lag})')
 
+        # sc1ee_list, sc2ee_list = [], []
+        # for i in tqdm(range(100), desc='Shuffling data'):
+        #     np.random.shuffle(E1)
+        #     np.random.shuffle(I1)
+        #     np.random.shuffle(E2)
+        #     np.random.shuffle(I2)
+        #     sc1ee_rnd, sc2ee_rnd, _, _, lib_ee_rnd = prediction_skill(E1, E2, lag, embed)
+        #     sc1ii_rnd, sc2ii_rnd, _, _, lib_ii_rnd = prediction_skill(I1, I2, lag, embed)
+        #     sc1ee_list.append(sc1ee_rnd)
+        #     sc2ee_list.append(sc2ee_rnd)
+        # sc1ee_list_mean = np.mean(np.array(sc1ee_list), axis=0)
+        # sc1ee_list_std = np.std(np.array(sc1ee_list), axis=0)
+
+
         plt.figure()
         plt.title('Prediction skill as function of library lenght')
-        plt.plot(lib_lens_ee, sc1ee, label='E1 => E2')
-        plt.plot(lib_lens_ii, sc2ee, label='E2 => E1')
+        plt.plot(lib_lens_ee, sc1ee, 'g', label='E1 => E2')
+        plt.plot(lib_lens_ii, sc2ee, 'r', label='E2 => E1')
+        # plt.plot(lib_ee_rnd, sc1ee_list_mean, 'k')
+        # plt.plot(lib_ee_rnd, sc1ee_list_mean + 3*sc1ee_list_std, 'k', lw=0.2)
+        # plt.plot(lib_ee_rnd, sc1ee_list_mean - 3*sc1ee_list_std, 'k', lw=0.2)
+        # plt.fill_between(lib_ee_rnd, sc1ee_list_mean + 3 *
+        #                  sc1ee_list_std, sc1ee_list_mean - 3*sc1ee_list_std, color='k', alpha=0.2)
         plt.xlabel('Library lenght')
         plt.grid()
         plt.legend()
         plt.show()
 
-
+    # Granger Causality. Maybe it requires some modifications (coming soon...)
     if args.granger_causality:
-        lenght = 2000
-        print("\n --------E1 Granger causes E2----------")
-        gca = granger_causality_test(E2[:lenght], E1[:lenght], 10)
-        print("\n --------E2 Granger causes E1----------")
-        gca = granger_causality_test(E1[:lenght], E2[:lenght], 10)
-
-
+        granger_causality_test(E1, E2, 10, verbose=True)
+        granger_causality_test(E2, E1, 10, verbose=True)
