@@ -75,31 +75,30 @@ def noisy_coupled_wc(alpha, beta,
     E2 = np.zeros(len(time))
     I2 = np.zeros(len(time))
     v = np.ones(len(time))
+    u = np.ones(len(time))
     [E1[0], I1[0], E2[0], I2[0]] = x0
 
     for t in range(len(time)-1):
         if direction == 0:
-            v[t+1] = np.abs(v[t] + 1*dt - v[t]*dt - 0.1*np.sqrt(dt)*np.random.normal())
-            Ze = np.random.poisson(v[t+1])
-            E1[t+1] = (E1[t] - E1[t]*dt + (k_e - E1[t])*sigmoid_function(c1 *
-                    E1[t] - c2*I1[t] + Ze, a_e, theta_e)*dt) / tau_e
-            I1[t+1] = (I1[t] - I1[t]*dt + (k_i - I1[t])*sigmoid_function(c3 *
-                    E1[t] - c4*I1[t], a_i, theta_i)*dt) / tau_i
-            E2[t+1] = (E2[t] - E2[t]*dt + (k_e - E2[t])*sigmoid_function(c1 *
-                    E2[t] - c2*I2[t] + alpha*E1[t], a_e, theta_e)*dt) / tau_e
-            I2[t+1] = (I2[t] - I2[t]*dt + (k_i - I2[t])*sigmoid_function(c3 *
-                        E2[t] - c4*I2[t] + beta*E1[t], a_i, theta_i)*dt) / tau_i
+            v[t+1] = v[t] + 0.5*(1.5 - v[t])*dt + 0.2*np.sqrt(dt)*np.random.normal()
+            E1[t+1] = E1[t] + (-E1[t] + (k_e - E1[t])*sigmoid_function(c1 *
+                    E1[t] - c2*I1[t] + 1.5, a_e, theta_e))*dt / tau_e
+            I1[t+1] = I1[t] + (-I1[t] + (k_i - I1[t])*sigmoid_function(c3 *
+                    E1[t] - c4*I1[t], a_i, theta_i))*dt / tau_i
+            E2[t+1] = E2[t] + (-E2[t] + (k_e - E2[t])*sigmoid_function(c1 *
+                    E2[t] - c2*I2[t] + alpha*E1[t], a_e, theta_e))*dt / tau_e
+            I2[t+1] = I2[t] + (-I2[t] + (k_i - I2[t])*sigmoid_function(c3 *
+                        E2[t] - c4*I2[t] + beta*E1[t], a_i, theta_i))*dt / tau_i
         else:
-            v[t+1] = np.abs(v[t] + 1*dt - v[t]*dt - 0.1*np.sqrt(dt)*np.random.normal())
-            Ze = np.random.poisson(v[t+1])
-            Zi = np.random.poisson(v[t+1])
-            E1[t+1] = (E1[t] - E1[t]*dt + (k_e - E1[t])*sigmoid_function(c1 *
-                    E1[t] - c2*I1[t] + Ze + alpha*E2[t], a_e, theta_e)*dt) / tau_e
-            I1[t+1] = (I1[t] - I1[t]*dt + (k_i - I1[t])*sigmoid_function(c3 *
+            v[t+1] = v[t] + 1*(1.5 - v[t])*dt + 0.1*np.sqrt(dt)*np.random.normal()
+            u[t+1] = u[t] + 1*(1.5 - u[t])*dt + 0.1*np.sqrt(dt)*np.random.normal()
+            E1[t+1] = E1[t] + (-E1[t]*dt + (k_e - E1[t])*sigmoid_function(c1 *
+                    E1[t] - c2*I1[t] + v[t] + alpha*E2[t], a_e, theta_e)*dt) / tau_e
+            I1[t+1] = I1[t] + (-I1[t]*dt + (k_i - I1[t])*sigmoid_function(c3 *
                     E1[t] - c4*I1[t], a_i, theta_i)*dt) / tau_i
-            E2[t+1] = (E2[t] - E2[t]*dt + (k_e - E2[t])*sigmoid_function(c1 *
-                    E2[t] - c2*I2[t] + Zi + alpha*E1[t], a_e, theta_e)*dt) / tau_e
-            I2[t+1] = (I2[t] - I2[t]*dt + (k_i - I2[t])*sigmoid_function(c3 *
+            E2[t+1] = E2[t] + (-E2[t]*dt + (k_e - E2[t])*sigmoid_function(c1 *
+                    E2[t] - c2*I2[t] + u[t] + alpha*E1[t], a_e, theta_e)*dt) / tau_e
+            I2[t+1] = I2[t] +(-I2[t]*dt + (k_i - I2[t])*sigmoid_function(c3 *
                         E2[t] - c4*I2[t], a_i, theta_i)*dt) / tau_i
 
     return E1, I1, E2, I2, v
@@ -120,7 +119,7 @@ def power_spectrum(x, t, step):
     return X
 
 
-def crosscorr(x, y, max_lag):
+def crosscorr(x, y, max_lag, bootstrap_test=False):
     x_mean = np.mean(x)
     y_mean = np.mean(y)
     cross_corr = []
@@ -134,6 +133,30 @@ def crosscorr(x, y, max_lag):
     plt.plot(cross_corr)
     plt.title('Cross-correlation function')
     plt.xlabel('Lags')
+
+
+    if bootstrap_test:
+        cross_corr_s = []
+        for i in range(5):
+            xs, ys = x, y
+            np.random.shuffle(xs)
+            np.random.shuffle(ys)
+            xs_mean = np.mean(xs)
+            ys_mean = np.mean(ys)
+            cross_corr_s_i = []
+            for d in range(max_lag):
+                cc = 0
+                for i in range(len(x)-d):
+                    cc += (xs[i] - xs_mean) * (ys[i+d] - ys_mean)
+                cc = cc / np.sqrt(np.sum((xs - xs_mean)**2) * np.sum((ys- ys_mean)**2))
+                cross_corr_s_i.append(cc)
+            cross_corr_s.append(cross_corr_s_i)
+        meancc = np.mean(np.array(cross_corr_s), axis=0)
+        stdcc = np.std(np.array(cross_corr_s), axis=0)
+        plt.plot(meancc - 3*stdcc, 'crimson', lw=0.5)
+        plt.plot(meancc, 'crimson', lw=0.5)
+        plt.plot(meancc + 3*stdcc, 'crimson', lw=0.5)
+        plt.fill_between(np.arange(0, max_lag), meancc + 2*stdcc, meancc - 2*stdcc, color='crimson', alpha=0.6)
     plt.grid()
     return cross_corr
 
@@ -267,12 +290,12 @@ if __name__ == "__main__":
     else:
         alpha = 1.3
         beta = 0
-        logging.info(f'Chaoitc regime --> alpha, beta = {alpha}')
+        logging.info(f'Chaoitc regime --> alpha = {alpha}')
 
     # initial conditions, integration step and time window
     x0 = [0.1, 0.1, 0.1, 0.1]
-    step = 0.1
-    t = np.arange(0, 3000, step)
+    step = 0.01
+    t = np.arange(0, 300, step)
 
     if args.noisywc:
         E1, I1, E2, I2, v = noisy_coupled_wc(alpha, beta, k_e, k_i, c1, c2, c3, c4, tau_e,
@@ -287,10 +310,11 @@ if __name__ == "__main__":
     e1, e2, e3, e4 = Embed(E1), Embed(I1), Embed(E2), Embed(I2)
 
     if args.dynamics_figure:
-        t = t[:5000]
-        E1t, E2t, I1t, I2t = E1[:5000], E2[:5000], I1[:5000], I2[:5000]
+        limit = int(len(t)/2)
+        t = t[:limit]
+        E1t, E2t, I1t, I2t = E1[:limit], E2[:limit], I1[:limit], I2[:limit]
         if args.noisywc:
-            vt = v[:5000]
+            vt = v[:limit]
             fig = plt.figure()
             fig.suptitle('Time series')
             ax1 = plt.subplot(511)
@@ -307,6 +331,7 @@ if __name__ == "__main__":
             ax4.set_title('I2')
             ax5 = plt.subplot(515)
             ax5.plot(t, vt, 'k', lw=0.4)
+            ax5.hlines(v.mean(), 0, t[-1], 'g', '--')
             ax5.set_title('Noise')
             plt.show()
         else:
@@ -441,9 +466,9 @@ if __name__ == "__main__":
 
     if args.cross_correlation:
         plt.figure()
-        crosscorr(E1, E2, 1000)
-        crosscorr(E2, E1, 1000)
-        plt.legend(['E1->E2', 'E2->E1'])
+        crosscorr(E1, E2, 100, bootstrap_test=True)
+        # crosscorr(E2, E1, 1000)
+        # plt.legend(['E1->E2', 'E2->E1'])
         plt.show()
 
 
