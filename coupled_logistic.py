@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from wilsoncowan import granger_causality_test
+from wilsoncowan import granger_causality_test, crosscorr
 from initial import crosscorr
 
 time = np.arange(0,500,0.1)
@@ -26,7 +26,6 @@ plt.show()
 for t in range(len(time)-1):
     x[t+1] = 3.9*x[t]*(1 - x[t] - 0.02*y[t])
     y[t+1] = 3.7*y[t]*(1 - y[t] - 0.2*x[t])
-print(f'\n {beta} ========= Y Granger causes X =========')
-granger_causality_test(x, y, [2], verbose=True)
-print(f'\n {beta} ========= X Granger causes Y =========')
-granger_causality_test(y, x, [2], verbose=True)
+
+
+crosscorr(x, y, 350, bootstrap_test=True)
