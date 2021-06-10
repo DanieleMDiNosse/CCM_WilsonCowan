@@ -20,7 +20,7 @@ def sigmoid_function(x, a, theta):
     Sigmoid function that must be used in the Wilson-Cowan model.
     '''
 
-    return 1 / (1 + math.exp(-a*(x - theta))) - 1 / (1 + math.exp(a*theta))
+    return 1 / (1 + np.exp(-a*(x - theta))) - 1 / (1 + np.exp(a*theta))
 
 
 def wilson_cowan(x, t, k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, a_e, a_i, theta_e, theta_i, P, Q):
@@ -82,7 +82,7 @@ def noisy_coupled_wc(alpha, beta,
         if direction == 0:
             v[t+1] = v[t] + 0.5*(1.5 - v[t])*dt + 0.2*np.sqrt(dt)*np.random.normal()
             E1[t+1] = E1[t] + (-E1[t] + (k_e - E1[t])*sigmoid_function(c1 *
-                    E1[t] - c2*I1[t] + 1.5, a_e, theta_e))*dt / tau_e
+                    E1[t] - c2*I1[t] + v[t], a_e, theta_e))*dt / tau_e
             I1[t+1] = I1[t] + (-I1[t] + (k_i - I1[t])*sigmoid_function(c3 *
                     E1[t] - c4*I1[t], a_i, theta_i))*dt / tau_i
             E2[t+1] = E2[t] + (-E2[t] + (k_e - E2[t])*sigmoid_function(c1 *
@@ -129,15 +129,14 @@ def crosscorr(x, y, max_lag, bootstrap_test=False):
             cc += (x[i] - x_mean) * (y[i+d] - y_mean)
         cc = cc / np.sqrt(np.sum((x - x_mean)**2) * np.sum((y - y_mean)**2))
         cross_corr.append(cc)
-
-    plt.plot(cross_corr)
+    plt.plot(cross_corr,'k')
     plt.title('Cross-correlation function')
     plt.xlabel('Lags')
 
 
     if bootstrap_test:
         cross_corr_s = []
-        for i in range(5):
+        for i in range(100):
             xs, ys = x, y
             np.random.shuffle(xs)
             np.random.shuffle(ys)
@@ -156,7 +155,7 @@ def crosscorr(x, y, max_lag, bootstrap_test=False):
         plt.plot(meancc - 3*stdcc, 'crimson', lw=0.5)
         plt.plot(meancc, 'crimson', lw=0.5)
         plt.plot(meancc + 3*stdcc, 'crimson', lw=0.5)
-        plt.fill_between(np.arange(0, max_lag), meancc + 2*stdcc, meancc - 2*stdcc, color='crimson', alpha=0.6)
+        plt.fill_between(np.arange(0, max_lag), meancc + 3*stdcc, meancc - 3*stdcc, color='crimson', alpha=0.6)
     plt.grid()
     return cross_corr
 
@@ -216,6 +215,8 @@ def granger_causality_test(x, y, maxlag, verbose=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Wilson-Cowan model analysis.')
+    parser.add_argument('-s', '--singlewc',
+                        action='store_true', help='Basic Wilson-Cowan model')
     parser.add_argument('-c', '--connectivity',
                         type=int, default=1, help='0 for unidirectional, 1 for bidirectional. The default is 1')
     parser.add_argument('-df', '--dynamics_figure', 
@@ -238,6 +239,8 @@ if __name__ == "__main__":
                         action='store_true', help='Cross correlation')
     parser.add_argument('-n', '--noisywc',
                         action='store_true', help='Add noise to the first oscillator')
+    parser.add_argument('-mnr', '--multiple_noisy_run',
+                        action='store_true', help='Solve 30 times WC noisy model in order to plot mean and std in the embedding part')
 
     parser.add_argument("-log", "--log", default="info",
                         help=("Provide logging level. Example --log debug', default='info"))
@@ -265,7 +268,51 @@ if __name__ == "__main__":
     theta_i = 3.7
     a_i = 2.0
     P = 1.09
+    Q = -0.65
     Pp = 1.06
+
+    if args.singlewc:
+        P = 1.5
+        Q = -1
+        x0 = [0.1, 0.1]
+        step = 0.01
+        t = np.arange(0,100, step)
+        x = odeint(wilson_cowan, x0, t, args=(k_e, k_i, c1, c2, c3, c4, 
+                            tau_e, tau_i, a_e, a_i, theta_e, theta_i, P, Q))
+        E, I = x[:, 0], x[:, 1]
+        fig = plt.figure()
+        ax = plt.subplot(2, 2, 1)
+        ax.plot(t, E, 'k')
+        ax.set_ylabel('E')
+        ax = plt.subplot(2, 2, 3)
+        ax.plot(t, I, 'k')
+        ax.set_ylabel('I')
+        ax = plt.subplot(2, 2, (2, 4))
+        ax.plot(E, I, 'k')
+        ax.set_ylabel('I')
+        ax.set_xlabel('E')
+
+        x, y = np.meshgrid(np.linspace(0, 0.45, 30), np.linspace(-0.025, 0.33, 30))
+        dEdt = (-x + (k_e - x)*sigmoid_function(c1*x - c2*y + P, a_e, theta_e))/tau_e
+        dIdt = (-y + (k_i - y)*sigmoid_function(c3*x - c4*y + Q, a_i, theta_i))/tau_i
+        ax = plt.subplot(2, 2, (2, 4))
+        ax.quiver(x, y, dEdt, dIdt)
+        plt.show()
+
+        i = 0
+        fig = plt.figure()
+        for P in [1.065, 1.2, 1.8]:
+            i += 1
+            x = odeint(wilson_cowan, x0, t, args=(k_e, k_i, c1, c2, c3, c4,
+                            tau_e, tau_i, a_e, a_i, theta_e, theta_i, P, Q))
+
+            ax = plt.subplot(3, 1, i)
+            ax.plot(t[:6000], x[:, 0][:6000], 'k')
+            ax.set_title('Q = 0, P = {0:.3f}'.format(P))
+        fig.suptitle('Excitatory population')
+        plt.show()
+
+
 
 
     if args.connectivity == 0:
@@ -298,8 +345,18 @@ if __name__ == "__main__":
     t = np.arange(0, 300, step)
 
     if args.noisywc:
-        E1, I1, E2, I2, v = noisy_coupled_wc(alpha, beta, k_e, k_i, c1, c2, c3, c4, tau_e,
+        if args.multiple_noisy_run:
+            E1l, I1l, E2l, I2l = [], [], [], []
+            run = 30
+        else:
+            run = 1
+        for i in range(run):
+            E1, I1, E2, I2, v = noisy_coupled_wc(alpha, beta, k_e, k_i, c1, c2, c3, c4, tau_e,
                                           tau_i, P1, P, Pp, direction, dt=step, time=t, x0=x0)
+            E1l.append(E1)
+            I1l.append(I1)
+            E2l.append(E2)
+            I2l.append(I2)
     else:
         x = odeint(coupled_wilson_cowan, x0, t, args=(alpha, beta,
             k_e, k_i, c1, c2, c3, c4, tau_e, tau_i, P1, P, Pp, direction))
@@ -406,7 +463,16 @@ if __name__ == "__main__":
                              power_spectrum(E2, t, step), power_spectrum(I2, t, step),
                              power_spectrum(v, t, step)]
             n = 5
-        else:
+        if args.singlewc:
+            powerspectrum = [power_spectrum(E1[6000:], t[6000:], step), power_spectrum(I1[6000:], t, step)]
+            ax = plt.subplot(2, 1, 1)
+            ax.plot(powerspectrum[0][0], powerspectrum[0][1], 'k', lw=0.4)
+            ax.set_title('E1')
+            ax = plt.subplot(2, 1, 2)
+            ax.plot(powerspectrum[1][0], powerspectrum[1][1], 'k', lw=0.4)
+            ax.set_title('I1')
+            plt.show()
+        if direction == 1:
             n = 4
             powerspectrum = [power_spectrum(E1, t, step), power_spectrum(I1, t, step),
                              power_spectrum(E2, t, step), power_spectrum(I2, t, step)]
@@ -477,43 +543,82 @@ if __name__ == "__main__":
     # can be looking at the autocorrelation function, but it can give misleading results since the system
     # is not linear.
     if args.embedding:
+        E2E1l, I2E1l, E2I1l, I2I1l, E1E2l = [], [], [], [], []
         lag = int(input('Select lag value (first minimum on MI): '))
-        embed_list = np.arange(1,10,1)
-        bestE2E1, bestE1E2 = [], []
-        bestI1I2, bestI2I1 = [], []
-        bestE2I1, bestI1E2 = [], []
-        bestE1I2, bestI2E1 = [], []
-        bestE2I2, bestI2E2 = [], []
-        for embed in tqdm(embed_list, desc='Embedding dimension list'):
-            sc1ee, sc2ee, E1_emb, E2_emb, _ = prediction_skill(E1, E2, lag, embed)
-            sc1ei1, sc2ei1, E1_emb, I2_emb, _ = prediction_skill(E1, I2, lag, embed)
-            sc1ei2, sc2ei2, E2_emb, I1_emb, _ = prediction_skill(E2, I1, lag, embed)
-            sc1ii, sc2ii, E2_emb, I1_emb, _ = prediction_skill(I1, I2, lag, embed)
-            if direction == 0:
-                bestE2E1.append(sc1ee[-1]) # E1 -> E2
-                bestI2E1.append(sc1ei1[-1]) # E1 -> I2
-                bestE2I1.append(sc2ei2[-1]) # I1 -> E2
-                bestI2I1.append(sc1ii[-1]) # I1 -> I2
-                # Just to check that E2 does not drive E1
-                bestE1E2.append(sc2ee[-1])  # E2 -> E1
-            else:
-                bestE1E2.append(sc2ee[-1]) # E2 -> E1
-                bestE1I2.append(sc2ei1[-1]) # I2 -> E1
-                bestI1E2.append(sc1ei2[-1]) # E2 -> I1
-                bestI1I2.append(sc2ii[-1]) # I2 -> I1
-                bestE2E1.append(sc1ee[-1])  # E1 -> E2
-                bestI2E1.append(sc1ei1[-1])  # E1 -> I2
-                bestE2I1.append(sc2ei2[-1])  # I1 -> E2
-                bestI2I1.append(sc1ii[-1])  # I1 -> I2
+        for E1, E2, I1, I2 in zip(E1l, E2l, I1l, I2l):
+            embed_list = np.arange(1,10,1)
+            bestE2E1, bestE1E2 = [], []
+            bestI1I2, bestI2I1 = [], []
+            bestE2I1, bestI1E2 = [], []
+            bestE1I2, bestI2E1 = [], []
+            bestE2I2, bestI2E2 = [], []
+            for embed in tqdm(embed_list, desc='Embedding dimension list'):
+                sc1ee, sc2ee, E1_emb, E2_emb, _ = prediction_skill(E1, E2, lag, embed)
+                sc1ei1, sc2ei1, E1_emb, I2_emb, _ = prediction_skill(E1, I2, lag, embed)
+                sc1ei2, sc2ei2, E2_emb, I1_emb, _ = prediction_skill(E2, I1, lag, embed)
+                sc1ii, sc2ii, E2_emb, I1_emb, _ = prediction_skill(I1, I2, lag, embed)
+                if direction == 0:
+                    bestE2E1.append(sc1ee[-1]) # E1 -> E2
+                    bestI2E1.append(sc1ei1[-1]) # E1 -> I2
+                    bestE2I1.append(sc2ei2[-1]) # I1 -> E2
+                    bestI2I1.append(sc1ii[-1]) # I1 -> I2
+                    # Just to check that E2 does not drive E1
+                    bestE1E2.append(sc2ee[-1])  # E2 -> E1
+
+                    if args.multiple_noisy_run:
+                        E2E1l.append(bestE2E1)
+                        I2E1l.append(bestI2E1)
+                        E2I1l.append(bestE2I1)
+                        I2I1l.append(bestI2I1)
+                        E1E2l.append(bestE1E2)
+                else:
+                    bestE1E2.append(sc2ee[-1]) # E2 -> E1
+                    bestE1I2.append(sc2ei1[-1]) # I2 -> E1
+                    bestI1E2.append(sc1ei2[-1]) # E2 -> I1
+                    bestI1I2.append(sc2ii[-1]) # I2 -> I1
+                    bestE2E1.append(sc1ee[-1])  # E1 -> E2
+                    bestI2E1.append(sc1ei1[-1])  # E1 -> I2
+                    bestE2I1.append(sc2ei2[-1])  # I1 -> E2
+                    bestI2I1.append(sc1ii[-1])  # I1 -> I2
+                
 
         plt.figure()
         plt.title('Prediction skills as function of embedding dimension')
         if direction == 0:
-            plt.plot(embed_list, bestE2E1, label="E1 => E2")
-            plt.plot(embed_list, bestI2I1, label="I1 => I2")
-            plt.plot(embed_list, bestE2I1, label="I1 => E2")
-            plt.plot(embed_list, bestI2E1, label="E1 => I2")
-            plt.plot(embed_list, bestE1E2, label="E2 => E1")
+            if args.multiple_noisy_run:
+                plt.plot(embed_list, np.mean(E2E1l, axis=0),
+                        'red', lw=0.2, label='E1 => E2')
+                plt.plot(embed_list, np.mean(E2E1l, axis=0) +
+                        np.std(E2E1l, axis=0), 'red', lw=0.2)
+                plt.plot(embed_list, np.mean(E2E1l, axis=0) -
+                        np.std(E2E1l, axis=0), 'red', lw=0.2)
+                plt.fill_between(np.arange(1, len(embed_list)+1), np.mean(
+                    E2E1l, axis=0)+np.std(E2E1l, axis=0), np.mean(E2E1l, axis=0)-np.std(E2E1l, axis=0), color='red', alpha=0.6)
+
+                plt.plot(embed_list, np.mean(E1E2l, axis=0),
+                        'purple', lw=0.2, label='E2 => E1')
+                plt.plot(embed_list, np.mean(E1E2l, axis=0) +
+                        np.std(E1E2l, axis=0), 'purple', lw=0.2)
+                plt.plot(embed_list, np.mean(E1E2l, axis=0) -
+                        np.std(E1E2l, axis=0), 'purple', lw=0.2)
+                plt.fill_between(np.arange(1, len(embed_list)+1), np.mean(
+                    E1E2l, axis=0)+np.std(E1E2l, axis=0), np.mean(E1E2l, axis=0)-np.std(E1E2l, axis=0), color='purple', alpha=0.6)
+
+                plt.plot(embed_list, np.mean(E2I1l, axis=0),
+                        'aqua', lw=0.2, label='I1 => E2')
+                plt.plot(embed_list, np.mean(E2I1l, axis=0) +
+                        np.std(E2I1l, axis=0), 'aqua', lw=0.2)
+                plt.plot(embed_list, np.mean(E2I1l, axis=0) -
+                        np.std(E2I1l, axis=0), 'aqua', lw=0.2)
+                plt.fill_between(np.arange(1, len(embed_list)+1), np.mean(
+                    E2I1l, axis=0)+np.std(E2I1l, axis=0), np.mean(E2I1l, axis=0)-np.std(E2I1l, axis=0), color='aqua', alpha=0.6)
+
+            else:
+                plt.plot(embed_list, bestE2E1, label="E1 => E2")
+                plt.plot(embed_list, bestI2I1, label="I1 => I2")
+                plt.plot(embed_list, bestE2I1, label="I1 => E2")
+                plt.plot(embed_list, bestI2E1, label="E1 => I2")
+                plt.plot(embed_list, bestE1E2, label="E2 => E1")
         else:
             plt.plot(embed_list, bestE2E1, label="E1 => E2")
             plt.plot(embed_list, bestI2I1, label="I1 => I2")
@@ -560,35 +665,12 @@ if __name__ == "__main__":
         ax.set_ylabel(f'I2(t+{lag})')
         ax.set_zlabel(f'I2(t+2*{lag})')
 
-        # sc1ee_list, sc2ee_list = [], []
-        # for i in tqdm(range(100), desc='Shuffling data'):
-        #     np.random.shuffle(E1)
-        #     np.random.shuffle(I1)
-        #     np.random.shuffle(E2)
-        #     np.random.shuffle(I2)
-        #     sc1ee_rnd, sc2ee_rnd, _, _, lib_ee_rnd = prediction_skill(E1, E2, lag, embed)
-        #     sc1ii_rnd, sc2ii_rnd, _, _, lib_ii_rnd = prediction_skill(I1, I2, lag, embed)
-        #     sc1ee_list.append(sc1ee_rnd)
-        #     sc2ee_list.append(sc2ee_rnd)
-        # sc1ee_list_mean = np.mean(np.array(sc1ee_list), axis=0)
-        # sc1ee_list_std = np.std(np.array(sc1ee_list), axis=0)
-
 
         plt.figure()
         plt.title('Prediction skill as function of library lenght')
         plt.plot(lib_lens_ee, sc1ee, 'g', label='E1 => E2')
         plt.plot(lib_lens_ii, sc2ee, 'r', label='E2 => E1')
-        # plt.plot(lib_ee_rnd, sc1ee_list_mean, 'k')
-        # plt.plot(lib_ee_rnd, sc1ee_list_mean + 3*sc1ee_list_std, 'k', lw=0.2)
-        # plt.plot(lib_ee_rnd, sc1ee_list_mean - 3*sc1ee_list_std, 'k', lw=0.2)
-        # plt.fill_between(lib_ee_rnd, sc1ee_list_mean + 3 *
-        #                  sc1ee_list_std, sc1ee_list_mean - 3*sc1ee_list_std, color='k', alpha=0.2)
         plt.xlabel('Library lenght')
         plt.grid()
         plt.legend()
         plt.show()
-
-    # Granger Causality. Maybe it requires some modifications (coming soon...)
-    if args.granger_causality:
-        granger_causality_test(E1, E2, 10, verbose=True)
-        granger_causality_test(E2, E1, 10, verbose=True)
